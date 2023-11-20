@@ -185,8 +185,13 @@ fn read_one_impl(
 
     if let Some((section_type, end_marker)) = section.as_ref() {
         if line.starts_with(end_marker) {
-            let der = base64::ENGINE
-                .decode(&b64buf)
+            let mut decoder: base64ct::Decoder<'_, base64ct::Base64Unpadded> =
+                base64ct::Decoder::new(&b64buf)
+                    .map_err(|err| Error::Base64Decode(format!("{err:?}")))?;
+
+            let mut der = Vec::with_capacity(decoder.remaining_len());
+            decoder
+                .decode_to_end(&mut der)
                 .map_err(|err| Error::Base64Decode(format!("{err:?}")))?;
 
             let item = match section_type.as_slice() {
@@ -211,8 +216,9 @@ fn read_one_impl(
     if section.is_some() {
         let mut trim = 0;
         for &b in line.iter().rev() {
+            // remove newlines, spaces and base64 padding
             match b {
-                b'\n' | b'\r' | b' ' => trim += 1,
+                b'\n' | b'\r' | b' ' | b'=' => trim += 1,
                 _ => break,
             }
         }
@@ -265,16 +271,3 @@ fn read_until_newline<R: io::BufRead + ?Sized>(
 pub fn read_all(rd: &mut dyn io::BufRead) -> impl Iterator<Item = Result<Item, io::Error>> + '_ {
     iter::from_fn(move || read_one(rd).transpose())
 }
-
-mod base64 {
-    use base64::alphabet::STANDARD;
-    use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
-    use base64::engine::DecodePaddingMode;
-    pub(super) use base64::engine::Engine;
-
-    pub(super) const ENGINE: GeneralPurpose = GeneralPurpose::new(
-        &STANDARD,
-        GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
-    );
-}
-use self::base64::Engine;
